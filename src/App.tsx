@@ -1,122 +1,82 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { CanvasEngine } from "@/canvas/CanvasEngine";
+import { useAppStore } from "@/store/useAppStore";
 
-function App() {
-  const [count, setCount] = useState(0)
+const CHANCE_PRESETS = [10, 25, 50, 75];
+
+export default function App() {
+  const balance = useAppStore((s) => s.balance);
+  const betAmount = useAppStore((s) => s.betAmount);
+  const winChance = useAppStore((s) => s.winChance);
+  const isSpinning = useAppStore((s) => s.isSpinning);
+  const lastResult = useAppStore((s) => s.lastResult);
+  const setWinChance = useAppStore((s) => s.setWinChance);
+  const startSpin = useAppStore((s) => s.startSpin);
+
+  // Потенциальная выплата для отображения игроку
+  const potentialWin = Math.round(betAmount * (100 / winChance));
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-8 flex flex-col items-center gap-6">
+      <header className="flex items-center justify-between w-full max-w-[800px] bg-slate-900 px-6 py-4 rounded-xl border border-slate-800">
+        <h1 className="text-xl font-bold tracking-tight text-sky-400">tema</h1>
+        <div className="px-4 py-1.5 rounded-lg bg-slate-950 border border-slate-800 font-mono text-sm">
+          Баланс: <span className="text-emerald-400 font-bold">${balance}</span>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
+      </header>
+
+      <div className="relative">
+        <CanvasEngine />
+
+        {/* Оверлей поверх канваса с процентом шанса и результатом */}
+        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+          <span className="text-3xl font-black font-mono text-slate-100">
+            {winChance}%
+          </span>
+          <span className="text-xs text-slate-400">
+            Выплата: ${potentialWin}
+          </span>
+          {lastResult && !isSpinning && (
+            <span
+              className={`mt-2 px-3 py-0.5 rounded text-xs font-bold uppercase ${
+                lastResult === "win"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : "bg-rose-500/20 text-rose-400 border border-rose-500/40"
+              }`}
+            >
+              {lastResult === "win" ? `Победа +$${potentialWin}` : "Неудача"}
+            </span>
+          )}
         </div>
+      </div>
+
+      {/* Панель выбора процента шанса и запуска */}
+      <div className="flex items-center gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800 w-full max-w-[800px] justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-400 mr-2">Шанс:</span>
+          {CHANCE_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              disabled={isSpinning}
+              onClick={() => setWinChance(preset)}
+              className={`px-4 py-2 rounded-lg font-mono text-sm font-bold transition cursor-pointer disabled:opacity-50 ${
+                winChance === preset
+                  ? "bg-emerald-500 text-slate-950"
+                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              {preset}%
+            </button>
+          ))}
+        </div>
+
         <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
+          disabled={isSpinning || balance < betAmount}
+          onClick={startSpin}
+          className="px-8 py-3 rounded-xl font-bold bg-sky-500 hover:bg-sky-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition cursor-pointer"
         >
-          Count is {count}
+          {isSpinning ? "Крутим..." : `Апгрейд ($${betAmount})`}
         </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      </div>
+    </main>
+  );
 }
-
-export default App

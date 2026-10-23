@@ -7,13 +7,22 @@ export default function App() {
   const balance = useAppStore((s) => s.balance);
   const betAmount = useAppStore((s) => s.betAmount);
   const winChance = useAppStore((s) => s.winChance);
-  const isSpinning = useAppStore((s) => s.isSpinning);
+  const spinState = useAppStore((s) => s.spinState);
   const lastResult = useAppStore((s) => s.lastResult);
   const setWinChance = useAppStore((s) => s.setWinChance);
   const startSpin = useAppStore((s) => s.startSpin);
 
   // Потенциальная выплата для отображения игроку
   const potentialWin = Math.round(betAmount * (100 / winChance));
+
+  // Если текущий шанс не входит в массив стандартных, значит выбрана кастомная/рандомная кнопка
+  const isCustomChance = !CHANCE_PRESETS.includes(winChance);
+
+  const handleRandomChance = () => {
+    // Генерируем случайный шанс от 1 до 90
+    const randomChance = Math.floor(Math.random() * 90) + 1;
+    setWinChance(randomChance);
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-8 flex flex-col items-center gap-6">
@@ -53,6 +62,8 @@ export default function App() {
       <div className="flex items-center gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800 w-full max-w-[800px] justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm text-slate-400 mr-2">Шанс:</span>
+
+          {/* Стандартные кнопки */}
           {CHANCE_PRESETS.map((preset) => (
             <button
               key={preset}
@@ -67,6 +78,19 @@ export default function App() {
               {preset}%
             </button>
           ))}
+
+          {/* Кнопка случайного шанса */}
+          <button
+            disabled={isSpinning}
+            onClick={handleRandomChance}
+            className={`px-4 py-2 rounded-lg font-mono text-sm font-bold transition cursor-pointer disabled:opacity-50 ${
+              isCustomChance
+                ? "bg-amber-500 text-amber-950 shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+                : "bg-slate-800 text-amber-400 hover:bg-slate-700"
+            }`}
+          >
+            {isCustomChance ? `${winChance}%` : "RND"}
+          </button>
         </div>
 
         <button

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback, memo } from "react";
-import { Application, extend } from "@pixi/react";
+import { Application, extend, useTick } from "@pixi/react";
 import { Container, Graphics } from "pixi.js";
-import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 
 extend({ Container, Graphics });
@@ -14,25 +13,81 @@ const UpgraderCore = () => {
 
   const targetAngle = useAppStore((s) => s.targetAngle);
   const winChance = useAppStore((s) => s.winChance);
+  const spinState = useAppStore((s) => s.spinState);
   const completeSpin = useAppStore((s) => s.completeSpin);
 
+  // Стейт физики. Переписан под точную математику кривой Безье (без потери кадров)
+  const physics = useRef({
+    velocity: 0,
+    startAngle: 0,
+    distance: 0,
+    timePassed: 0,
+    timeTotal: 0,
+    isStopping: false,
+    targetCalculated: false,
+  });
+
+  // Старт запроса — даем начальный импульс
   useEffect(() => {
-    if (!pointerRef.current || targetAngle === 0) return;
+    if (spinState === "requesting") {
+      physics.current.velocity = 25; // Градусов за кадр
+      physics.current.isStopping = false;
+      physics.current.targetCalculated = false;
+    }
+  }, [spinState]);
 
-    // Крутим свойство angle (в градусах) вместо rotation
-    const tween = gsap.to(pointerRef.current, {
-      angle: targetAngle,
-      duration: 4,
-      ease: "power4.out",
-      onComplete: () => {
-        completeSpin();
-      },
-    });
+  // Вызывается каждый кадр (обычно 60 раз в секунду)
+  // Вызывается каждый кадр
+  useTick((ticker: any) => {
+    if (!pointerRef.current || spinState === "idle") return;
+    const delta = ticker?.deltaTime ?? ticker ?? 1;
 
-    return () => {
-      tween.kill();
-    };
-  }, [targetAngle, completeSpin]);
+    // СТАДИЯ 1: Бесконечное вращение с постоянной скоростью
+    if (spinState === "requesting") {
+      pointerRef.current.angle += physics.current.velocity * delta;
+      pointerRef.current.angle %= 360;
+    }
+
+    // СТАДИЯ 2: Ответ получен, вычисляем идеальный тормозной путь
+    if (spinState === "spinning") {
+      if (!physics.current.targetCalculated) {
+        const currentAngle = pointerRef.current.angle;
+        let dist = targetAngle - currentAngle;
+        if (dist < 0) dist += 360;
+        dist += 360 * 6; // Накидываем ровно 6 обязательных оборотов
+
+        physics.current.startAngle = currentAngle;
+        physics.current.distance = dist;
+        // Время торможения (в кадрах) = 2 * Путь / Начальная Скорость
+        physics.current.timeTotal = (2 * dist) / physics.current.velocity;
+        physics.current.timePassed = 0;
+
+        physics.current.targetCalculated = true;
+        physics.current.isStopping = true;
+      }
+
+      if (physics.current.isStopping) {
+        physics.current.timePassed += delta;
+        // Прогресс анимации от 0 до 1
+        let progress = physics.current.timePassed / physics.current.timeTotal;
+
+        if (progress >= 1) {
+          progress = 1;
+          pointerRef.current.angle = targetAngle;
+          physics.current.isStopping = false;
+          completeSpin();
+        } else {
+          // Идеальная математическая кривая торможения (Quadratic Ease Out)
+          // Формула: 2t - t^2. Сохраняет начальную скорость и плавно сводит ее в 0
+          const easeOut = progress * (2 - progress);
+          const traveled = physics.current.distance * easeOut;
+
+          pointerRef.current.angle =
+            (physics.current.startAngle + traveled) % 360;
+        }
+      }
+    }
+  });
 
   const drawRadar = useCallback(
     (g: Graphics) => {

@@ -3,46 +3,62 @@ import { create } from "zustand";
 const FULL_CIRCLE = 360; // Полный круг в градусах
 const EDGE_PADDING = 2.5; // Защитный отступ 2.5 градуса от границ сектора
 
+type SpinState = "idle" | "requesting" | "spinning";
+
 interface AppState {
   balance: number;
   betAmount: number;
   winChance: number;
-  isSpinning: boolean;
-  targetAngle: number; // Угол в обычных градусах (0 - 360+)
+  spinState: SpinState;
+  targetAngle: number;
   lastResult: "win" | "loss" | null;
   pendingPayout: number;
   setWinChance: (chance: number) => void;
-  startSpin: () => void;
+  startSpin: () => Promise<void>;
   completeSpin: () => void;
 }
+
+// Изначальный шанс — случайное число от 1 до 90
+const initialRandomChance = Math.floor(Math.random() * 90) + 1;
 
 export const useAppStore = create<AppState>((set, get) => ({
   balance: 1000,
   betAmount: 100,
-  winChance: 30,
-  isSpinning: false,
+  winChance: initialRandomChance,
+  spinState: "idle",
   targetAngle: 0,
   lastResult: null,
   pendingPayout: 0,
 
   setWinChance: (chance) => {
-    if (get().isSpinning) return;
+    if (get().spinState !== "idle") return;
     set({ winChance: chance, lastResult: null });
   },
 
-  startSpin: () => {
-    const { balance, betAmount, winChance, isSpinning, targetAngle } = get();
-    if (isSpinning || balance < betAmount) return;
+  startSpin: async () => {
+    const { balance, betAmount, winChance, spinState } = get();
 
-    // --- БЛОК ИМИТАЦИИ ОТВЕТА СЕРВЕРА (Mock Backend) ---
+    // Блокируем, если уже крутится или не хватает денег
+    if (spinState !== "idle" || balance < betAmount) return;
+
+    set({
+      balance: balance - betAmount,
+      spinState: "requesting",
+      lastResult: null,
+    });
+
+    // Имитация ответа сервера (рандомная задержка от 0 до 2 секунд)
+    const mockNetworkDelay = Math.random() * 2000;
+    await new Promise((resolve) => setTimeout(resolve, mockNetworkDelay));
+
     const isWin = Math.random() * 100 < winChance;
     const payout = isWin ? Math.round(betAmount * (100 / winChance)) : 0;
-    // ---------------------------------------------------
 
     // Переводим процент шанса в градусы (например, 50% = 180 градусов)
     const winSectorDegrees = (winChance / 100) * FULL_CIRCLE;
-
     let landingDegree = 0;
+
+    // Считаем чистый градус посадки (0-360) с отступами от швов
     if (isWin) {
       const min = EDGE_PADDING;
       const max = Math.max(min, winSectorDegrees - EDGE_PADDING);
@@ -53,15 +69,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       landingDegree = min + Math.random() * (max - min);
     }
 
-    // Округляем прошлые полные обороты до 360 + добавляем 6 новых кругов (2160 град.) + угол посадки
-    const baseFullTurns = Math.floor(targetAngle / FULL_CIRCLE) * FULL_CIRCLE;
-    const nextAngle = baseFullTurns + FULL_CIRCLE * 6 + landingDegree;
-
+    // Передаем точный градус, а CanvasEngine сам докрутит нужные 6 оборотов
     set({
-      balance: balance - betAmount,
-      isSpinning: true,
-      targetAngle: nextAngle,
-      lastResult: null,
+      spinState: "spinning",
+      targetAngle: landingDegree,
       pendingPayout: payout,
     });
   },
@@ -69,7 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   completeSpin: () => {
     const { balance, pendingPayout } = get();
     set({
-      isSpinning: false,
+      spinState: "idle",
       balance: balance + pendingPayout,
       lastResult: pendingPayout > 0 ? "win" : "loss",
       pendingPayout: 0,

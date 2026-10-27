@@ -13,6 +13,7 @@ export default function App() {
   const startSpin = useAppStore((s) => s.startSpin);
 
   // Потенциальная выплата для отображения игроку
+  const isSpinning = spinState !== "idle";
   const potentialWin = Math.round(betAmount * (100 / winChance));
 
   // Если текущий шанс не входит в массив стандартных, значит выбрана кастомная/рандомная кнопка

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, memo } from "react";
 import { Application, extend, useTick } from "@pixi/react";
 import { Container, Graphics } from "pixi.js";
 import { useAppStore } from "@/store/useAppStore";
+import { gameAudio } from "@/utils/sound";
 
 extend({ Container, Graphics });
 
@@ -17,6 +18,7 @@ const UpgraderCore = () => {
   const completeSpin = useAppStore((s) => s.completeSpin);
 
   // Стейт физики. Переписан под точную математику кривой Безье (без потери кадров)
+
   const physics = useRef({
     velocity: 0,
     startAngle: 0,
@@ -25,42 +27,50 @@ const UpgraderCore = () => {
     timeTotal: 0,
     isStopping: false,
     targetCalculated: false,
+    // Звуковой накопитель
+    tickAccumulator: 0,
+    traveled: 0,
+    lastTickTime: 0,
   });
 
   // Старт запроса — даем начальный импульс
   useEffect(() => {
     if (spinState === "requesting") {
-      physics.current.velocity = 25; // Градусов за кадр
+      physics.current.velocity = 17;
       physics.current.isStopping = false;
       physics.current.targetCalculated = false;
+      physics.current.tickAccumulator = 0; // Обнуляем звук перед новым спином
     }
   }, [spinState]);
 
   // Вызывается каждый кадр (обычно 60 раз в секунду)
-  // Вызывается каждый кадр
   useTick((ticker: any) => {
     if (!pointerRef.current || spinState === "idle") return;
     const delta = ticker?.deltaTime ?? ticker ?? 1;
 
-    // СТАДИЯ 1: Бесконечное вращение с постоянной скоростью
+    // В эту переменную мы будем записывать, на сколько градусов сдвинулась стрелка В ЭТОМ КАДРЕ
+    let deltaAngle = 0;
+
+    // СТАДИЯ 1: Ожидание (крутим линейно)
     if (spinState === "requesting") {
-      pointerRef.current.angle += physics.current.velocity * delta;
+      deltaAngle = physics.current.velocity * delta; // Путь = Скорость * Время
+      pointerRef.current.angle += deltaAngle;
       pointerRef.current.angle %= 360;
     }
 
-    // СТАДИЯ 2: Ответ получен, вычисляем идеальный тормозной путь
+    // СТАДИЯ 2: Ответ получен, плавно тормозим
     if (spinState === "spinning") {
       if (!physics.current.targetCalculated) {
         const currentAngle = pointerRef.current.angle;
         let dist = targetAngle - currentAngle;
         if (dist < 0) dist += 360;
-        dist += 360 * 6; // Накидываем ровно 6 обязательных оборотов
+        dist += 360 * 4; // Накидываем обороты
 
         physics.current.startAngle = currentAngle;
         physics.current.distance = dist;
-        // Время торможения (в кадрах) = 2 * Путь / Начальная Скорость
         physics.current.timeTotal = (2 * dist) / physics.current.velocity;
         physics.current.timePassed = 0;
+        physics.current.traveled = 0; // Изначально проехали 0
 
         physics.current.targetCalculated = true;
         physics.current.isStopping = true;
@@ -68,23 +78,46 @@ const UpgraderCore = () => {
 
       if (physics.current.isStopping) {
         physics.current.timePassed += delta;
-        // Прогресс анимации от 0 до 1
         let progress = physics.current.timePassed / physics.current.timeTotal;
 
         if (progress >= 1) {
+          // Остановка
           progress = 1;
-          pointerRef.current.angle = targetAngle;
+          // Добиваем остаток угла, чтобы звук щелкнул правильно в самом конце
+          deltaAngle = physics.current.distance - physics.current.traveled;
+
+          pointerRef.current.angle = targetAngle; // Идеальная остановка
           physics.current.isStopping = false;
           completeSpin();
         } else {
-          // Идеальная математическая кривая торможения (Quadratic Ease Out)
-          // Формула: 2t - t^2. Сохраняет начальную скорость и плавно сводит ее в 0
+          // Движение по кривой торможения
           const easeOut = progress * (2 - progress);
-          const traveled = physics.current.distance * easeOut;
+          const traveledNow = physics.current.distance * easeOut;
+
+          // Пройденный угол за кадр = (Сколько прошли всего сейчас) - (Сколько прошли всего кадр назад)
+          deltaAngle = traveledNow - physics.current.traveled;
+          physics.current.traveled = traveledNow; // Запоминаем текущую дистанцию
 
           pointerRef.current.angle =
-            (physics.current.startAngle + traveled) % 360;
+            (physics.current.startAngle + traveledNow) % 360;
         }
+      }
+    }
+
+    // --- ЗВУКОВОЙ ТРИГГЕР ---
+    // Добавляем пройденный в этом кадре микро-угол в копилку
+    physics.current.tickAccumulator += deltaAngle;
+
+    // Если накопили больше 36 градусов — издаем щелчок
+    if (physics.current.tickAccumulator >= 36) {
+      physics.current.tickAccumulator %= 36; // Сбрасываем копилку сразу
+
+      const now = performance.now(); // Берем текущее время браузера
+
+      // Играем звук только если с прошлого щелчка прошло больше 50 миллисекунд
+      if (now - physics.current.lastTickTime > 50) {
+        gameAudio.play("tick");
+        physics.current.lastTickTime = now;
       }
     }
   });

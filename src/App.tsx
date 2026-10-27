@@ -1,5 +1,7 @@
 import { CanvasEngine } from "@/canvas/CanvasEngine";
 import { useAppStore } from "@/store/useAppStore";
+import { useEffect, useState } from "react";
+import { gameAudio } from "@/utils/sound"; // Импорт нашего спрайта
 
 const CHANCE_PRESETS = [10, 25, 50, 75];
 
@@ -11,6 +13,19 @@ export default function App() {
   const lastResult = useAppStore((s) => s.lastResult);
   const setWinChance = useAppStore((s) => s.setWinChance);
   const startSpin = useAppStore((s) => s.startSpin);
+
+  // Стейт готовности аудиофайла
+  const [isAudioReady, setIsAudioReady] = useState(false);
+
+  useEffect(() => {
+    // Если Howler успел загрузить файл из кэша мгновенно
+    if (gameAudio.state() === "loaded") {
+      setIsAudioReady(true);
+    } else {
+      // Иначе подписываемся на событие успешной загрузки
+      gameAudio.once("load", () => setIsAudioReady(true));
+    }
+  }, []);
 
   // Потенциальная выплата для отображения игроку
   const isSpinning = spinState !== "idle";
@@ -95,11 +110,15 @@ export default function App() {
         </div>
 
         <button
-          disabled={isSpinning || balance < betAmount}
+          disabled={isSpinning || balance < betAmount || !isAudioReady}
           onClick={startSpin}
           className="px-8 py-3 rounded-xl font-bold bg-sky-500 hover:bg-sky-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition cursor-pointer"
         >
-          {isSpinning ? "Крутим..." : `Апгрейд ($${betAmount})`}
+          {!isAudioReady
+            ? "Загрузка..."
+            : isSpinning
+              ? "Крутим..."
+              : `Апгрейд ($${betAmount})`}
         </button>
       </div>
     </main>

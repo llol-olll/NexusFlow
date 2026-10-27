@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { gameAudio } from "@/utils/sound";
 
 const FULL_CIRCLE = 360; // Полный круг в градусах
 const EDGE_PADDING = 2.5; // Защитный отступ 2.5 градуса от границ сектора
@@ -41,6 +42,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Блокируем, если уже крутится или не хватает денег
     if (spinState !== "idle" || balance < betAmount) return;
 
+    // Это мгновенно разбудит AudioContext браузера и даст самый первый щелчок без задержек.
+    gameAudio.play("tick");
+
     set({
       balance: balance - betAmount,
       spinState: "requesting",
@@ -79,10 +83,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   completeSpin: () => {
     const { balance, pendingPayout } = get();
+    const isWin = pendingPayout > 0;
+
+    // Запускаем нужный кусок аудио-спрайта
+    gameAudio.play(isWin ? "win" : "loss");
+
     set({
       spinState: "idle",
       balance: balance + pendingPayout,
-      lastResult: pendingPayout > 0 ? "win" : "loss",
+      lastResult: isWin ? "win" : "loss",
       pendingPayout: 0,
     });
   },

@@ -1,136 +1,151 @@
 import { useEffect, useRef, useCallback, memo } from "react";
-import { Application, extend, useTick } from "@pixi/react";
-import { Container, Graphics } from "pixi.js";
+import { Application, extend } from "@pixi/react"; // Убрали useTick
+import { Container, Graphics, Ticker } from "pixi.js"; // Добавили Ticker
 import { useAppStore } from "@/store/useAppStore";
 import { gameAudio } from "@/utils/sound";
 
 extend({ Container, Graphics });
 
-// Однострочный переводчик градусов в радианы специально для метода g.arc()
 const degToRad = (deg: number) => (deg * Math.PI) / 180;
 
 const UpgraderCore = () => {
   const pointerRef = useRef<Container>(null);
 
-  const targetAngle = useAppStore((s) => s.targetAngle);
+  // Оставляем в React только winChance, так как он нужен для отрисовки дуги.
+  // Эта переменная меняется только при клике на кнопки, так что во время спина ререндеров НЕ БУДЕТ.
   const winChance = useAppStore((s) => s.winChance);
-  const spinState = useAppStore((s) => s.spinState);
-  const completeSpin = useAppStore((s) => s.completeSpin);
 
-  // Стейт физики. Переписан под точную математику кривой Безье (без потери кадров)
-
+  // Наш физический движок
   const physics = useRef({
     velocity: 0,
+    nextTickAngle: 0, // Абсолютная цель для следующего звука
     startAngle: 0,
     distance: 0,
     timePassed: 0,
     timeTotal: 0,
     isStopping: false,
     targetCalculated: false,
-    // Звуковой накопитель
-    tickAccumulator: 0,
     traveled: 0,
-    lastTickTime: 0,
   });
 
-  // Старт запроса — даем начальный импульс
+  // ВЕСЬ ИГРОВОЙ ЦИКЛ ЖИВЕТ ЗДЕСЬ И НЕ ЗАВИСИТ ОТ REACT
   useEffect(() => {
-    if (spinState === "requesting") {
-      physics.current.velocity = 17;
-      physics.current.isStopping = false;
-      physics.current.targetCalculated = false;
-      physics.current.tickAccumulator = 0; // Обнуляем звук перед новым спином
-    }
-  }, [spinState]);
+    const handleTick = (tickerObj: any) => {
+      if (!pointerRef.current) return;
 
-  // Вызывается каждый кадр (обычно 60 раз в секунду)
-  useTick((ticker: any) => {
-    if (!pointerRef.current || spinState === "idle") return;
-    const delta = ticker?.deltaTime ?? ticker ?? 1;
+      const state = useAppStore.getState();
+      const spinState = state.spinState;
+      const targetAngle = state.targetAngle;
 
-    // В эту переменную мы будем записывать, на сколько градусов сдвинулась стрелка В ЭТОМ КАДРЕ
-    let deltaAngle = 0;
-
-    // СТАДИЯ 1: Ожидание (крутим линейно)
-    if (spinState === "requesting") {
-      deltaAngle = physics.current.velocity * delta; // Путь = Скорость * Время
-      pointerRef.current.angle += deltaAngle;
-      pointerRef.current.angle %= 360;
-    }
-
-    // СТАДИЯ 2: Ответ получен, плавно тормозим
-    if (spinState === "spinning") {
-      if (!physics.current.targetCalculated) {
-        const currentAngle = pointerRef.current.angle;
-        let dist = targetAngle - currentAngle;
-        if (dist < 0) dist += 360;
-        dist += 360 * 4; // Накидываем обороты
-
-        physics.current.startAngle = currentAngle;
-        physics.current.distance = dist;
-        physics.current.timeTotal = (2 * dist) / physics.current.velocity;
-        physics.current.timePassed = 0;
-        physics.current.traveled = 0; // Изначально проехали 0
-
-        physics.current.targetCalculated = true;
-        physics.current.isStopping = true;
+      if (spinState === "idle") {
+        physics.current.velocity = 0;
+        return;
       }
 
-      if (physics.current.isStopping) {
-        physics.current.timePassed += delta;
-        let progress = physics.current.timePassed / physics.current.timeTotal;
+      const rawDelta = tickerObj?.deltaTime ?? tickerObj ?? 1;
+      const delta = Math.min(rawDelta, 10);
 
-        if (progress >= 1) {
-          // Остановка
-          progress = 1;
-          // Добиваем остаток угла, чтобы звук щелкнул правильно в самом конце
-          deltaAngle = physics.current.distance - physics.current.traveled;
+      // СТАДИЯ 1: Разгон и кручение
+      if (spinState === "requesting") {
+        if (physics.current.velocity === 0 && !physics.current.isStopping) {
+          const currentA = pointerRef.current.angle;
+          let nextGrid = Math.floor(currentA / 45) * 45 + 45;
 
-          pointerRef.current.angle = targetAngle; // Идеальная остановка
-          physics.current.isStopping = false;
-          completeSpin();
-        } else {
-          // Движение по кривой торможения
-          const easeOut = progress * (2 - progress);
-          const traveledNow = physics.current.distance * easeOut;
+          // ЗАЩИТА ОТ ДАБЛ-КЛИКА:
+          // Если до ближайшего тика меньше 25 градусов, пропускаем его.
+          // Это даст звуку "start" отзвучать чисто, без наслоения.
+          if (nextGrid - currentA < 35) {
+            nextGrid += 45;
+          }
 
-          // Пройденный угол за кадр = (Сколько прошли всего сейчас) - (Сколько прошли всего кадр назад)
-          deltaAngle = traveledNow - physics.current.traveled;
-          physics.current.traveled = traveledNow; // Запоминаем текущую дистанцию
+          physics.current.nextTickAngle = nextGrid;
+          physics.current.targetCalculated = false;
+          physics.current.traveled = 0;
+        }
 
-          pointerRef.current.angle =
-            (physics.current.startAngle + traveledNow) % 360;
+        const MAX_VELOCITY = 20;
+        const ACCELERATION = 0.5;
+
+        if (physics.current.velocity < MAX_VELOCITY) {
+          physics.current.velocity += ACCELERATION * delta;
+          if (physics.current.velocity > MAX_VELOCITY) {
+            physics.current.velocity = MAX_VELOCITY;
+          }
+        }
+
+        // Просто прибавляем угол, НЕ ИСПОЛЬЗУЕМ % 360
+        pointerRef.current.angle += physics.current.velocity * delta;
+      }
+
+      // СТАДИЯ 2: Торможение
+      if (spinState === "spinning") {
+        if (!physics.current.targetCalculated) {
+          const currentAngle = pointerRef.current.angle;
+
+          // Так как currentAngle теперь может быть 3000 градусов,
+          // находим его позицию на круге
+          const currentWrapped = currentAngle % 360;
+
+          let dist = targetAngle - currentWrapped;
+          if (dist < 0) dist += 360;
+          dist += 360 * 3; // 3 полных оборота
+
+          physics.current.startAngle = currentAngle;
+          physics.current.distance = dist;
+          physics.current.timeTotal = (2 * dist) / physics.current.velocity;
+          physics.current.timePassed = 0;
+          physics.current.traveled = 0;
+
+          physics.current.targetCalculated = true;
+          physics.current.isStopping = true;
+        }
+
+        if (physics.current.isStopping) {
+          physics.current.timePassed += delta;
+          let progress = physics.current.timePassed / physics.current.timeTotal;
+
+          if (progress >= 1) {
+            progress = 1;
+            pointerRef.current.angle =
+              physics.current.startAngle + physics.current.distance;
+
+            // --- ФИНАЛЬНЫЙ АКЦЕНТИРОВАННЫЙ ЩЕЛЧОК ---
+            // Срабатывает в идеальный момент полной остановки физики
+            gameAudio.play("tick_final");
+
+            pointerRef.current.angle = pointerRef.current.angle % 360;
+            physics.current.isStopping = false;
+            state.completeSpin();
+          } else {
+            const easeOut = progress * (2 - progress);
+            const traveledNow = physics.current.distance * easeOut;
+            physics.current.traveled = traveledNow;
+
+            pointerRef.current.angle = physics.current.startAngle + traveledNow;
+          }
         }
       }
-    }
 
-    // --- ЗВУКОВОЙ ТРИГГЕР ---
-    // Добавляем пройденный в этом кадре микро-угол в копилку
-    physics.current.tickAccumulator += deltaAngle;
-
-    // Если накопили больше 36 градусов — издаем щелчок
-    if (physics.current.tickAccumulator >= 36) {
-      physics.current.tickAccumulator %= 36; // Сбрасываем копилку сразу
-
-      const now = performance.now(); // Берем текущее время браузера
-
-      // Играем звук только если с прошлого щелчка прошло больше 50 миллисекунд
-      if (now - physics.current.lastTickTime > 50) {
+      // Если стрелка + опережение пересекли заветную отметку (45, 90, 135...)
+      if (pointerRef.current.angle - 0.0138 >= physics.current.nextTickAngle) {
         gameAudio.play("tick");
-        physics.current.lastTickTime = now;
+        physics.current.nextTickAngle += 45; // Ставим следующую цель ровно через 45 градусов
       }
-    }
-  });
+    };
+
+    Ticker.shared.add(handleTick);
+    return () => {
+      Ticker.shared.remove(handleTick);
+    };
+  }, []);
 
   const drawRadar = useCallback(
     (g: Graphics) => {
       g.clear();
-
       g.circle(0, 0, 130);
       g.fill({ color: 0x0f172a });
       g.stroke({ width: 18, color: 0x1e293b });
 
-      // В градусах всё прозрачно: стартуем с -90 град. (12 часов) и рисуем дугу длиной (winChance * 3.6) град.
       const startRad = degToRad(-90);
       const endRad = degToRad(-90 + (winChance / 100) * 360);
 

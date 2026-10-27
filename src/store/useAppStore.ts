@@ -43,7 +43,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (spinState !== "idle" || balance < betAmount) return;
 
     // Это мгновенно разбудит AudioContext браузера и даст самый первый щелчок без задержек.
-    gameAudio.play("tick");
+    gameAudio.play("start");
 
     set({
       balance: balance - betAmount,
@@ -52,7 +52,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     // Имитация ответа сервера (рандомная задержка от 0 до 2 секунд)
-    const mockNetworkDelay = Math.random() * 2000;
+    const mockNetworkDelay = 1500 + Math.random() * 1000;
     await new Promise((resolve) => setTimeout(resolve, mockNetworkDelay));
 
     const isWin = Math.random() * 100 < winChance;

@@ -2,6 +2,7 @@ import { CanvasEngine } from "@/canvas/CanvasEngine";
 import { useAppStore } from "@/store/useAppStore";
 import { useEffect, useState } from "react";
 import { gameAudio } from "@/utils/sound"; // Импорт нашего спрайта
+import { BalanceCounter } from "@/components/BalanceCounter";
 
 const CHANCE_PRESETS = [10, 25, 50, 75];
 
@@ -45,7 +46,7 @@ export default function App() {
       <header className="flex items-center justify-between w-full max-w-[800px] bg-slate-900 px-6 py-4 rounded-xl border border-slate-800">
         <h1 className="text-xl font-bold tracking-tight text-sky-400">tema</h1>
         <div className="px-4 py-1.5 rounded-lg bg-slate-950 border border-slate-800 font-mono text-sm">
-          Баланс: <span className="text-emerald-400 font-bold">${balance}</span>
+          Баланс: <BalanceCounter balance={balance} />
         </div>
       </header>
 

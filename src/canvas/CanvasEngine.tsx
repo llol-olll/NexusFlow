@@ -6,9 +6,9 @@ import { gameAudio } from "@/utils/sound";
 
 extend({ Container, Graphics });
 
-const degToRad = (deg: number) => (deg * Math.PI) / 180;
-
 const CORRECTION_SPIN_SOUND = 0.01397;
+
+const degToRad = (deg: number) => (deg * Math.PI) / 180;
 
 const UpgraderCore = () => {
   const pointerRef = useRef<Container>(null);

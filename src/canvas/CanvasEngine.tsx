@@ -8,6 +8,8 @@ extend({ Container, Graphics });
 
 const degToRad = (deg: number) => (deg * Math.PI) / 180;
 
+const CORRECTION_SPIN_SOUND = 0.01397;
+
 const UpgraderCore = () => {
   const pointerRef = useRef<Container>(null);
 
@@ -127,7 +129,10 @@ const UpgraderCore = () => {
       }
 
       // Если стрелка + опережение пересекли заветную отметку (45, 90, 135...)
-      if (pointerRef.current.angle - 0.0138 >= physics.current.nextTickAngle) {
+      if (
+        pointerRef.current.angle - CORRECTION_SPIN_SOUND >=
+        physics.current.nextTickAngle
+      ) {
         gameAudio.play("tick");
         physics.current.nextTickAngle += 45; // Ставим следующую цель ровно через 45 градусов
       }

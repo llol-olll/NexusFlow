@@ -111,7 +111,7 @@ export default function App() {
 
         <button
           disabled={isSpinning || balance < betAmount || !isAudioReady}
-          onClick={startSpin}
+          onPointerDown={startSpin}
           className="px-8 py-3 rounded-xl font-bold bg-sky-500 hover:bg-sky-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition cursor-pointer"
         >
           {!isAudioReady

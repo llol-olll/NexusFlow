@@ -16,6 +16,7 @@ const UpgraderCore = () => {
   // Оставляем в React только winChance, так как он нужен для отрисовки дуги.
   // Эта переменная меняется только при клике на кнопки, так что во время спина ререндеров НЕ БУДЕТ.
   const winChance = useAppStore((s) => s.winChance);
+  const radarRef = useRef<Graphics>(null);
 
   // Наш физический движок
   const physics = useRef({
@@ -28,6 +29,8 @@ const UpgraderCore = () => {
     isStopping: false,
     targetCalculated: false,
     traveled: 0,
+    glowTime: 0,
+    glowIntensity: 0,
   });
 
   // ВЕСЬ ИГРОВОЙ ЦИКЛ ЖИВЕТ ЗДЕСЬ И НЕ ЗАВИСИТ ОТ REACT
@@ -38,16 +41,35 @@ const UpgraderCore = () => {
       const state = useAppStore.getState();
       const spinState = state.spinState;
       const targetAngle = state.targetAngle;
+      const lastResult = state.lastResult;
 
+      const rawDelta = tickerObj?.deltaTime ?? tickerObj ?? 1;
+      const delta = Math.min(rawDelta, 10);
+
+      // 1. ПУЛЬСАЦИЯ: Считается ДО раннего выхода, пока spinState содержит "idle"
+      if (spinState === "idle" && lastResult === "win") {
+        physics.current.glowTime += delta * 0.08;
+        physics.current.glowIntensity =
+          (Math.sin(physics.current.glowTime) + 1) / 2;
+        if (radarRef.current) {
+          drawRadarRef.current(radarRef.current); // БЫЛО: drawRadar(...)
+        }
+      } else if (physics.current.glowIntensity !== 0) {
+        physics.current.glowTime = 0;
+        physics.current.glowIntensity = 0;
+        if (radarRef.current) {
+          drawRadarRef.current(radarRef.current); // БЫЛО: drawRadar(...)
+        }
+      }
+
+      // 2. РАННИЙ ВЫХОД ДЛЯ ФИЗИКИ: Перенесен СЮДА
+      // Отсекает расчет движения стрелки, если колесо неподвижно
       if (spinState === "idle") {
         physics.current.velocity = 0;
         return;
       }
 
-      const rawDelta = tickerObj?.deltaTime ?? tickerObj ?? 1;
-      const delta = Math.min(rawDelta, 10);
-
-      // СТАДИЯ 1: Разгон и кручение
+      // 3. СТАДИЯ 1: Разгон и кручение
       if (spinState === "requesting") {
         if (physics.current.velocity === 0 && !physics.current.isStopping) {
           const currentA = pointerRef.current.angle;
@@ -79,7 +101,7 @@ const UpgraderCore = () => {
         pointerRef.current.angle += physics.current.velocity * delta;
       }
 
-      // СТАДИЯ 2: Торможение
+      //4.  СТАДИЯ 2: Торможение
       if (spinState === "spinning") {
         if (!physics.current.targetCalculated) {
           const currentAngle = pointerRef.current.angle;
@@ -128,7 +150,7 @@ const UpgraderCore = () => {
         }
       }
 
-      // Если стрелка + опережение пересекли заветную отметку (45, 90, 135...)
+      //5.  Если стрелка + опережение пересекли заветную отметку (45, 90, 135...)
       if (
         pointerRef.current.angle - CORRECTION_SPIN_SOUND >=
         physics.current.nextTickAngle
@@ -157,12 +179,26 @@ const UpgraderCore = () => {
       g.arc(0, 0, 130, startRad, endRad);
       g.stroke({ width: 18, color: 0x10b981, cap: "butt" });
 
+      //  Слой пульсации поверх основной линии при победе.
+      if (physics.current.glowIntensity > 0) {
+        g.arc(0, 0, 130, startRad, endRad);
+        g.stroke({
+          width: 18,
+          color: 0x6ee7b7,
+          cap: "butt",
+          alpha: physics.current.glowIntensity * 0.8,
+        });
+      }
+
       g.circle(0, 0, 95);
       g.fill({ color: 0x090d16 });
       g.stroke({ width: 2, color: 0x334155 });
     },
     [winChance],
   );
+
+  const drawRadarRef = useRef(drawRadar);
+  drawRadarRef.current = drawRadar;
 
   const drawPointer = useCallback((g: Graphics) => {
     g.clear();
@@ -182,7 +218,7 @@ const UpgraderCore = () => {
 
   return (
     <pixiContainer x={400} y={200}>
-      <pixiGraphics draw={drawRadar} />
+      <pixiGraphics ref={radarRef} draw={drawRadar} />
       <pixiContainer ref={pointerRef}>
         <pixiGraphics draw={drawPointer} />
       </pixiContainer>

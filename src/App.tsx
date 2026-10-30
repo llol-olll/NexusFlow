@@ -44,7 +44,9 @@ export default function App() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-8 flex flex-col items-center gap-6">
       <header className="flex items-center justify-between w-full max-w-[800px] bg-slate-900 px-6 py-4 rounded-xl border border-slate-800">
-        <h1 className="text-xl font-bold tracking-tight text-sky-400">tema</h1>
+        <h1 className="text-xl font-bold tracking-tight text-sky-400">
+          Sprint
+        </h1>
         <div className="px-4 py-1.5 rounded-lg bg-slate-950 border border-slate-800 font-mono text-sm">
           Баланс: <BalanceCounter balance={balance} />
         </div>
@@ -59,24 +61,31 @@ export default function App() {
             {winChance}%
           </span>
           <span className="text-xs text-slate-400">
-            Выплата: ${potentialWin}
+            Выплата:{" "}
+            <span className="text-sm text-slate-200">${potentialWin}</span>
           </span>
 
-          {/* Фиксированный слот высотой 24px: предотвращает сдвиг чисел вверх */}
-          <div className="h-6 mt-2 flex items-center justify-center">
-            <span
-              className={`px-3 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border transition-all duration-200 ease-out ${
-                lastResult && !isSpinning
-                  ? "opacity-100 scale-100"
-                  : "opacity-0 scale-90"
-              } ${
-                lastResult === "win"
-                  ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-                  : "bg-rose-950/80 text-rose-400 border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.25)]"
-              }`}
-            >
-              {lastResult === "win" ? `Победа +$${potentialWin}` : "Неудача"}
-            </span>
+          {/* Фиксированный слот статуса: исключает пустоту и Layout Shift */}
+          <div className="h-6 mt-3 flex items-center justify-center">
+            {isSpinning ? (
+              <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-bold tracking-[0.25em] border bg-slate-900/90 text-slate-400 border-slate-700/60 shadow-[0_0_8px_rgba(148,163,184,0.15)] animate-pulse">
+                ···
+              </span>
+            ) : lastResult ? (
+              <span
+                className={`px-3 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border transition-all duration-200 ${
+                  lastResult === "win"
+                    ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                    : "bg-rose-950/80 text-rose-400 border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.25)]"
+                }`}
+              >
+                {lastResult === "win" ? `Победа +$${potentialWin}` : "Неудача"}
+              </span>
+            ) : (
+              <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border bg-slate-900/80 text-slate-400 border-slate-800">
+                СТАРТ
+              </span>
+            )}
           </div>
         </div>
       </div>

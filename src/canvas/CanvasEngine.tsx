@@ -206,20 +206,29 @@ const UpgraderCore = () => {
   const drawRadar = useCallback(
     (g: Graphics) => {
       g.clear();
+
+      // 1. Внешний базовый трек
       g.circle(0, 0, 130);
       g.fill({ color: 0x0f172a });
       g.stroke({ width: 18, color: 0x1e293b });
 
+      // 2. Сектор шанса (зеленая дуга)
       const startRad = degToRad(-90);
       const endRad = degToRad(-90 + (winChance / 100) * 360);
 
+      // ИСПРАВЛЕНИЕ: перемещение пера исключает внутренний паразитный отрезок от (0, 0)
+      g.moveTo(0, -130);
       g.arc(0, 0, 130, startRad, endRad);
       g.stroke({ width: 18, color: 0x10b981, cap: "butt" });
 
-      /// --- ВОЛНА ХИЛА (ПОБЕДА) ---
+      // 3. Аккуратный микро-разделитель нулевой точки строго в пределах трека (12 часов)
+      g.moveTo(0, -121);
+      g.lineTo(0, -139);
+      g.stroke({ width: 2, color: 0x090d16 });
+
+      // 4. Волна победы
       if (physics.current.winRippleProgress < 1) {
         const p = physics.current.winRippleProgress;
-        // УВЕЛИЧИЛИ РАДИУС РАССЕИВАНИЯ: теперь кольцо расходится на 120px вместо 60px
         const rippleRadius = 130 + p * 120;
         const rippleAlpha = (1 - p) * 0.9;
         const rippleWidth = 18 * (1 - p * 0.5);
@@ -228,31 +237,36 @@ const UpgraderCore = () => {
         g.stroke({ width: rippleWidth, color: 0x34d399, alpha: rippleAlpha });
       }
 
-      // --- АНИМАЦИЯ УРОНА (ПОРАЖЕНИЕ) ---
+      // 5. Анимация урона (поражение)
       if (physics.current.lossPulseProgress < 1) {
         const p = physics.current.lossPulseProgress;
-
-        // 1. Статичный круг: висит на максимуме до 60% времени анимации, затем резко тухнет
         const holdPhase = 0.6;
         let coreAlpha = 0;
         if (p < holdPhase) {
-          coreAlpha = 0.8; // Зависшая яркая фаза
+          coreAlpha = 0.8;
         } else {
-          // Резкий спад в 0 за остаток времени
           coreAlpha = 0.8 * (1 - (p - holdPhase) / (1 - holdPhase));
         }
 
         g.circle(0, 0, 130);
         g.stroke({ width: 18, color: 0xef4444, alpha: coreAlpha });
 
-        // 2. Ударная волна урона: появляется ЗА кругом (начинается с радиуса 145px)
-        const waveRadius = 145 + p * 50; // Расширяется наружу
-        const waveAlpha = (1 - p) * 0.8; // Резкое затухание
-        const waveWidth = 10 * (1 - p); // Тонкая агрессивная линия
+        const waveRadius = 145 + p * 50;
+        const waveAlpha = (1 - p) * 0.8;
+        const waveWidth = 10 * (1 - p);
 
         g.circle(0, 0, waveRadius);
         g.stroke({ width: waveWidth, color: 0xf87171, alpha: waveAlpha });
       }
+
+      // 6. Контрастная центральная подложка циферблата (отсекает сектор от текста)
+      g.circle(0, 0, 98);
+      g.fill({ color: 0x090d16 });
+      g.stroke({ width: 2, color: 0x1e293b });
+
+      // Тонкая внутренняя декоративная риска
+      g.circle(0, 0, 90);
+      g.stroke({ width: 1, color: 0x334155, alpha: 0.4 });
     },
     [winChance],
   );
@@ -262,18 +276,26 @@ const UpgraderCore = () => {
 
   const drawPointer = useCallback((g: Graphics) => {
     g.clear();
-    g.moveTo(0, -148);
-    g.lineTo(-9, -166);
-    g.lineTo(9, -166);
-    g.closePath();
-    g.fill({ color: 0x38bdf8 });
 
-    g.moveTo(0, 0);
-    g.lineTo(0, -140);
-    g.stroke({ width: 3, color: 0x38bdf8 });
+    // 1. Внешний неоновый ореол рассеяния (Bloom-ореол)
+    g.moveTo(0, -98);
+    g.lineTo(0, -134);
+    g.stroke({ width: 34, color: 0xc026d3, alpha: 0.18, cap: "round" });
 
-    g.circle(0, 0, 8);
-    g.fill({ color: 0xf8fafc });
+    // 2. Насыщенный слой неоновой мадженты
+    g.moveTo(0, -98);
+    g.lineTo(0, -134);
+    g.stroke({ width: 20, color: 0xec4899, alpha: 0.4, cap: "round" });
+
+    // 3. Плотный световой фронт
+    g.moveTo(0, -98);
+    g.lineTo(0, -134);
+    g.stroke({ width: 15, color: 0xf472b6, alpha: 0.8, cap: "round" });
+
+    // 4. Раскаленное белое ядро плазменного луча
+    g.moveTo(0, -98);
+    g.lineTo(0, -134);
+    g.stroke({ width: 6.2, color: 0xffffff, alpha: 0.98, cap: "round" });
   }, []);
 
   return (

@@ -54,24 +54,30 @@ export default function App() {
         <CanvasEngine />
 
         {/* Оверлей поверх канваса с процентом шанса и результатом */}
-        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center select-none">
           <span className="text-3xl font-black font-mono text-slate-100">
             {winChance}%
           </span>
           <span className="text-xs text-slate-400">
             Выплата: ${potentialWin}
           </span>
-          {lastResult && !isSpinning && (
+
+          {/* Фиксированный слот высотой 24px: предотвращает сдвиг чисел вверх */}
+          <div className="h-6 mt-2 flex items-center justify-center">
             <span
-              className={`mt-2 px-3 py-0.5 rounded text-xs font-bold uppercase ${
+              className={`px-3 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider border transition-all duration-200 ease-out ${
+                lastResult && !isSpinning
+                  ? "opacity-100 scale-100"
+                  : "opacity-0 scale-90"
+              } ${
                 lastResult === "win"
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                  : "bg-rose-500/20 text-rose-400 border border-rose-500/40"
+                  ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                  : "bg-rose-950/80 text-rose-400 border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.25)]"
               }`}
             >
               {lastResult === "win" ? `Победа +$${potentialWin}` : "Неудача"}
             </span>
-          )}
+          </div>
         </div>
       </div>
 

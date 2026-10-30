@@ -6,7 +6,7 @@ export const gameAudio = new Howl({
   sprite: {
     tick: [30, 80],
     win: [500, 2500],
-    loss: [3100, 850],
+    loss: [3120, 850],
     tick_final: [4036, 80],
     start: [5050, 1500],
   },

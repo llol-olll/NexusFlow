@@ -29,8 +29,8 @@ const UpgraderCore = () => {
     isStopping: false,
     targetCalculated: false,
     traveled: 0,
-    glowTime: 0,
-    glowIntensity: 0,
+    winRippleProgress: 1, // 1 = анимация завершена (покой), 0 = старт
+    lossPulseProgress: 1, // 1 = анимация завершена (покой), 0 = старт
   });
 
   // ВЕСЬ ИГРОВОЙ ЦИКЛ ЖИВЕТ ЗДЕСЬ И НЕ ЗАВИСИТ ОТ REACT
@@ -46,24 +46,43 @@ const UpgraderCore = () => {
       const rawDelta = tickerObj?.deltaTime ?? tickerObj ?? 1;
       const delta = Math.min(rawDelta, 10);
 
-      // 1. ПУЛЬСАЦИЯ: Считается ДО раннего выхода, пока spinState содержит "idle"
-      if (spinState === "idle" && lastResult === "win") {
-        physics.current.glowTime += delta * 0.08;
-        physics.current.glowIntensity =
-          (Math.sin(physics.current.glowTime) + 1) / 2;
-        if (radarRef.current) {
-          drawRadarRef.current(radarRef.current); // БЫЛО: drawRadar(...)
+      // --- МАТЕМАТИКА АНИМАЦИИ ВОЛНЫ (Без графики!) ---
+      if (spinState === "idle") {
+        let needsRedraw = false;
+
+        // 1. Волна победы
+        if (physics.current.winRippleProgress < 1) {
+          // Если статус "win", двигаем анимацию. Если статус пропал (сменили шанс) - жестко сбрасываем в 1
+          physics.current.winRippleProgress =
+            lastResult === "win"
+              ? physics.current.winRippleProgress + delta * 0.035
+              : 1;
+          needsRedraw = true;
         }
-      } else if (physics.current.glowIntensity !== 0) {
-        physics.current.glowTime = 0;
-        physics.current.glowIntensity = 0;
-        if (radarRef.current) {
-          drawRadarRef.current(radarRef.current); // БЫЛО: drawRadar(...)
+
+        // 2. Вспышка урона
+        if (physics.current.lossPulseProgress < 1) {
+          // Если статус "loss", двигаем анимацию. Иначе - жестко сбрасываем в 1
+          physics.current.lossPulseProgress =
+            lastResult === "loss"
+              ? physics.current.lossPulseProgress + delta * 0.025
+              : 1;
+          needsRedraw = true;
+        }
+
+        // Защита от переполнения (ограничиваем ровно единицей)
+        if (physics.current.winRippleProgress > 1)
+          physics.current.winRippleProgress = 1;
+        if (physics.current.lossPulseProgress > 1)
+          physics.current.lossPulseProgress = 1;
+
+        // Перерисовываем холст только если 애니мaция активна
+        if (needsRedraw && radarRef.current) {
+          drawRadarRef.current(radarRef.current);
         }
       }
 
-      // 2. РАННИЙ ВЫХОД ДЛЯ ФИЗИКИ: Перенесен СЮДА
-      // Отсекает расчет движения стрелки, если колесо неподвижно
+      // --- РАННИЙ ВЫХОД ---
       if (spinState === "idle") {
         physics.current.velocity = 0;
         return;
@@ -72,6 +91,14 @@ const UpgraderCore = () => {
       // 3. СТАДИЯ 1: Разгон и кручение
       if (spinState === "requesting") {
         if (physics.current.velocity === 0 && !physics.current.isStopping) {
+          physics.current.winRippleProgress = 1;
+          physics.current.lossPulseProgress = 1;
+
+          // 2. Заставляем PixiJS стереть зависшие волны (вызов g.clear())
+          if (radarRef.current) {
+            drawRadarRef.current(radarRef.current);
+          }
+
           const currentA = pointerRef.current.angle;
           let nextGrid = Math.floor(currentA / 45) * 45 + 45;
 
@@ -139,6 +166,16 @@ const UpgraderCore = () => {
 
             pointerRef.current.angle = pointerRef.current.angle % 360;
             physics.current.isStopping = false;
+
+            // Взводим волну в 0 для запуска при выигрыше
+            if (state.pendingPayout > 0) {
+              physics.current.winRippleProgress = 0;
+              physics.current.lossPulseProgress = 1;
+            } else {
+              physics.current.winRippleProgress = 1;
+              physics.current.lossPulseProgress = 0; // Запускаем урон
+            }
+
             state.completeSpin();
           } else {
             const easeOut = progress * (2 - progress);
@@ -179,20 +216,43 @@ const UpgraderCore = () => {
       g.arc(0, 0, 130, startRad, endRad);
       g.stroke({ width: 18, color: 0x10b981, cap: "butt" });
 
-      //  Слой пульсации поверх основной линии при победе.
-      if (physics.current.glowIntensity > 0) {
-        g.arc(0, 0, 130, startRad, endRad);
-        g.stroke({
-          width: 18,
-          color: 0x6ee7b7,
-          cap: "butt",
-          alpha: physics.current.glowIntensity * 0.8,
-        });
+      /// --- ВОЛНА ХИЛА (ПОБЕДА) ---
+      if (physics.current.winRippleProgress < 1) {
+        const p = physics.current.winRippleProgress;
+        // УВЕЛИЧИЛИ РАДИУС РАССЕИВАНИЯ: теперь кольцо расходится на 120px вместо 60px
+        const rippleRadius = 130 + p * 120;
+        const rippleAlpha = (1 - p) * 0.9;
+        const rippleWidth = 18 * (1 - p * 0.5);
+
+        g.circle(0, 0, rippleRadius);
+        g.stroke({ width: rippleWidth, color: 0x34d399, alpha: rippleAlpha });
       }
 
-      g.circle(0, 0, 95);
-      g.fill({ color: 0x090d16 });
-      g.stroke({ width: 2, color: 0x334155 });
+      // --- АНИМАЦИЯ УРОНА (ПОРАЖЕНИЕ) ---
+      if (physics.current.lossPulseProgress < 1) {
+        const p = physics.current.lossPulseProgress;
+
+        // 1. Статичный круг: висит на максимуме до 60% времени анимации, затем резко тухнет
+        const holdPhase = 0.6;
+        let coreAlpha = 0;
+        if (p < holdPhase) {
+          coreAlpha = 0.8; // Зависшая яркая фаза
+        } else {
+          // Резкий спад в 0 за остаток времени
+          coreAlpha = 0.8 * (1 - (p - holdPhase) / (1 - holdPhase));
+        }
+
+        g.circle(0, 0, 130);
+        g.stroke({ width: 18, color: 0xef4444, alpha: coreAlpha });
+
+        // 2. Ударная волна урона: появляется ЗА кругом (начинается с радиуса 145px)
+        const waveRadius = 145 + p * 50; // Расширяется наружу
+        const waveAlpha = (1 - p) * 0.8; // Резкое затухание
+        const waveWidth = 10 * (1 - p); // Тонкая агрессивная линия
+
+        g.circle(0, 0, waveRadius);
+        g.stroke({ width: waveWidth, color: 0xf87171, alpha: waveAlpha });
+      }
     },
     [winChance],
   );

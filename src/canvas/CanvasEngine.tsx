@@ -7,6 +7,12 @@ import { gameAudio } from "@/utils/sound";
 extend({ Container, Graphics });
 
 const CORRECTION_SPIN_SOUND = 0.01397;
+// --- ФИЗИЧЕСКИЕ НАСТРОЙКИ КОЛЕСА ---
+const MAX_VELOCITY = 20; // Предельная скорость (градусов/кадр)
+const ACCEL_START_BASE = 0.24; // Стартовый толчок (было 0.12 — увеличили в 2 раза для бодрого старта)
+const ACCEL_RAMP_POWER = 0.56; // Максимальная прибавка тяги при разгоне
+const MIN_STOP_REVOLUTIONS = 5; // Минимальное число полных оборотов при торможении (было 3)
+const STOP_EASE_POWER = 2.2; // Степень кривой: 2 = бодрый финиш, 3 = классика, 4-5 = затяжное драматичное подползание
 
 const degToRad = (deg: number) => (deg * Math.PI) / 180;
 
@@ -17,6 +23,31 @@ const UpgraderCore = () => {
   // Эта переменная меняется только при клике на кнопки, так что во время спина ререндеров НЕ БУДЕТ.
   const winChance = useAppStore((s) => s.winChance);
   const radarRef = useRef<Graphics>(null);
+
+  const speedFxRef = useRef<Graphics>(null);
+  const isSpeedFxActive = useRef(false);
+  const noopDraw = useCallback(() => {}, []);
+
+  // Статичный буфер орбитальных дуг (без аллокаций в рантайме)
+  const speedArcs = useRef(
+    Array.from({ length: 12 }, (_, i) => ({
+      radius: 155 + (i % 4) * 18,
+      angle: (i * 360) / 12,
+      baseLength: 10 + (i % 3) * 6,
+      speedMult: 0.85 + (i % 3) * 0.2,
+      color: i % 2 === 0 ? 0x06b6d4 : 0xec4899, // Бирюзовый и неоновая маджента
+    })),
+  );
+
+  // Статичный буфер радиальных лучей
+  const speedRays = useRef(
+    Array.from({ length: 16 }, (_, i) => ({
+      angle: (i * 360) / 16,
+      innerR: 146,
+      outerR: 200 + (i % 4) * 25,
+      offset: (i * 23) % 360,
+    })),
+  );
 
   // Наш физический движок
   const physics = useRef({
@@ -33,8 +64,113 @@ const UpgraderCore = () => {
     lossPulseProgress: 1, // 1 = анимация завершена (покой), 0 = старт
   });
 
+  const drawSpeedFx = useCallback(
+    (
+      g: Graphics,
+      speed: number,
+      delta: number,
+      currentAngle: number,
+      stopProgress: number = 0, // Добавили параметр: 0 в полете, стремится к 1 перед остановкой
+    ) => {
+      g.clear();
+      if (speed <= 0.1) return;
+
+      const tension = stopProgress > 0 ? Math.pow(stopProgress, 2) : 0;
+      const intensity = Math.min(1, Math.max(0.15, speed / MAX_VELOCITY));
+
+      // 1. Орбитальные шлейфы
+      speedArcs.current.forEach((arc) => {
+        arc.angle = (arc.angle + speed * arc.speedMult * delta) % 360;
+
+        // При торможении дуги не растворяются, а укорачиваются и уплотняются
+        const arcLengthDeg =
+          (arc.baseLength + 45) * intensity * (1 - tension * 0.5);
+        if (arcLengthDeg < 0.5) return;
+
+        // Радиус плавно притягивается ближе к треку колеса
+        const dynamicRadius = arc.radius - (arc.radius - 142) * tension;
+
+        const startAngle = degToRad(arc.angle);
+        const endAngle = degToRad(arc.angle + arcLengthDeg);
+
+        g.moveTo(
+          Math.cos(startAngle) * dynamicRadius,
+          Math.sin(startAngle) * dynamicRadius,
+        );
+        g.arc(0, 0, dynamicRadius, startAngle, endAngle);
+        g.stroke({
+          width: Math.max(0.5, (1.5 + intensity * 2.5) * (1 + tension * 0.7)),
+          color: arc.color,
+          alpha: Math.min(1, intensity * 0.7 + tension * 0.3),
+          cap: "round",
+        });
+      });
+
+      // 2. Радиальные лучи (исчезают первыми, чтобы очистить сцену к моменту удара)
+      if (tension < 0.8) {
+        const rayAlphaMult = 1 - tension / 0.8;
+        speedRays.current.forEach((ray, idx) => {
+          const rotAngle = (ray.angle + ray.offset + currentAngle * 0.25) % 360;
+          const rad = degToRad(rotAngle);
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+
+          const dynamicOuter =
+            ray.innerR + (ray.outerR - ray.innerR) * intensity;
+          if (dynamicOuter - ray.innerR < 1) return;
+
+          g.moveTo(cos * ray.innerR, sin * ray.innerR);
+          g.lineTo(cos * dynamicOuter, sin * dynamicOuter);
+          g.stroke({
+            width: 1.5 * intensity,
+            color: 0x38bdf8,
+            alpha: (0.1 + (idx % 3) * 0.1) * intensity * rayAlphaMult,
+          });
+        });
+      }
+    },
+    [],
+  );
+
+  const drawSpeedFxRef = useRef(drawSpeedFx);
+  drawSpeedFxRef.current = drawSpeedFx;
+
   // ВЕСЬ ИГРОВОЙ ЦИКЛ ЖИВЕТ ЗДЕСЬ И НЕ ЗАВИСИТ ОТ REACT
   useEffect(() => {
+    // Функция мгновенного завершения спина (если вкладка ушла в фон)
+    const forceInstantFinish = () => {
+      const state = useAppStore.getState();
+      // Завершаем только если рулетка уже получила угол от сервера и крутится
+      if (state.spinState !== "spinning" || !pointerRef.current) return;
+
+      // 1. Ставим стрелку ровно на целевой градус без анимации
+      pointerRef.current.angle = state.targetAngle;
+
+      // 2. Сбрасываем физику и очищаем шлейфы скорости
+      physics.current.isStopping = false;
+      physics.current.targetCalculated = false;
+      physics.current.velocity = 0;
+      physics.current.winRippleProgress = 1;
+      physics.current.lossPulseProgress = 1;
+
+      if (speedFxRef.current) {
+        speedFxRef.current.clear();
+        isSpeedFxActive.current = false;
+      }
+
+      // 3. Звук финиша и перевод стейт-машины в завершенное состояние
+      gameAudio.play("tick_final");
+      state.completeSpin();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        forceInstantFinish();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     const handleTick = (tickerObj: any) => {
       if (!pointerRef.current) return;
 
@@ -46,37 +182,29 @@ const UpgraderCore = () => {
       const rawDelta = tickerObj?.deltaTime ?? tickerObj ?? 1;
       const delta = Math.min(rawDelta, 10);
 
-      // --- МАТЕМАТИКА АНИМАЦИИ ВОЛНЫ (Без графики!) ---
+      // --- МАТЕМАТИКА АНИМАЦИИ ВОЛНЫ (Автономный цикл) ---
       if (spinState === "idle") {
         let needsRedraw = false;
 
-        // 1. Волна победы
+        // 1. Волна победы: летит своим чередом до 1, не оглядываясь на смену lastResult
         if (physics.current.winRippleProgress < 1) {
-          // Если статус "win", двигаем анимацию. Если статус пропал (сменили шанс) - жестко сбрасываем в 1
-          physics.current.winRippleProgress =
-            lastResult === "win"
-              ? physics.current.winRippleProgress + delta * 0.035
-              : 1;
+          physics.current.winRippleProgress += delta * 0.035;
+          if (physics.current.winRippleProgress >= 1) {
+            physics.current.winRippleProgress = 1;
+          }
           needsRedraw = true;
         }
 
-        // 2. Вспышка урона
+        // 2. Вспышка урона: завершается гарантированно без обрыва
         if (physics.current.lossPulseProgress < 1) {
-          // Если статус "loss", двигаем анимацию. Иначе - жестко сбрасываем в 1
-          physics.current.lossPulseProgress =
-            lastResult === "loss"
-              ? physics.current.lossPulseProgress + delta * 0.025
-              : 1;
+          physics.current.lossPulseProgress += delta * 0.025;
+          if (physics.current.lossPulseProgress >= 1) {
+            physics.current.lossPulseProgress = 1;
+          }
           needsRedraw = true;
         }
 
-        // Защита от переполнения (ограничиваем ровно единицей)
-        if (physics.current.winRippleProgress > 1)
-          physics.current.winRippleProgress = 1;
-        if (physics.current.lossPulseProgress > 1)
-          physics.current.lossPulseProgress = 1;
-
-        // Перерисовываем холст только если 애니мaция активна
+        // Перерисовываем холст только пока тикает активная волна
         if (needsRedraw && radarRef.current) {
           drawRadarRef.current(radarRef.current);
         }
@@ -114,36 +242,50 @@ const UpgraderCore = () => {
           physics.current.traveled = 0;
         }
 
-        const MAX_VELOCITY = 20;
-        const ACCELERATION = 0.5;
+        // Прогрессивный разгон: старт с мягких 0.12 (без рывка) с плавным набором темпа до 0.6
+        const speedRatio = physics.current.velocity / MAX_VELOCITY;
+
+        const progressiveAccel =
+          (ACCEL_START_BASE + Math.pow(speedRatio, 1.5) * ACCEL_RAMP_POWER) *
+          delta;
 
         if (physics.current.velocity < MAX_VELOCITY) {
-          physics.current.velocity += ACCELERATION * delta;
-          if (physics.current.velocity > MAX_VELOCITY) {
-            physics.current.velocity = MAX_VELOCITY;
-          }
+          physics.current.velocity = Math.min(
+            MAX_VELOCITY,
+            physics.current.velocity + progressiveAccel,
+          );
         }
 
         // Просто прибавляем угол, НЕ ИСПОЛЬЗУЕМ % 360
         pointerRef.current.angle += physics.current.velocity * delta;
       }
 
-      //4.  СТАДИЯ 2: Торможение
+      // 4. СТАДИЯ 2: Торможение и расчет прогресса
+      let stopProgress = 0;
+      let instantSpeed = 0;
+
+      if (spinState === "requesting") {
+        instantSpeed = physics.current.velocity;
+      }
+
       if (spinState === "spinning") {
+        if (document.hidden) {
+          forceInstantFinish();
+          return;
+        }
+
         if (!physics.current.targetCalculated) {
           const currentAngle = pointerRef.current.angle;
-
-          // Так как currentAngle теперь может быть 3000 градусов,
-          // находим его позицию на круге
           const currentWrapped = currentAngle % 360;
 
           let dist = targetAngle - currentWrapped;
           if (dist < 0) dist += 360;
-          dist += 360 * 3; // 3 полных оборота
+          dist += 360 * MIN_STOP_REVOLUTIONS;
 
           physics.current.startAngle = currentAngle;
           physics.current.distance = dist;
-          physics.current.timeTotal = (2 * dist) / physics.current.velocity;
+          physics.current.timeTotal =
+            (STOP_EASE_POWER * dist) / physics.current.velocity;
           physics.current.timePassed = 0;
           physics.current.traveled = 0;
 
@@ -153,32 +295,45 @@ const UpgraderCore = () => {
 
         if (physics.current.isStopping) {
           physics.current.timePassed += delta;
-          let progress = physics.current.timePassed / physics.current.timeTotal;
+          stopProgress = Math.min(
+            1,
+            physics.current.timePassed / physics.current.timeTotal,
+          );
+          // Поддерживаем видимую скорость шлейфа вплоть до финального пикселя
+          instantSpeed = Math.max(
+            0.5,
+            physics.current.velocity *
+              Math.pow(1 - stopProgress, STOP_EASE_POWER),
+          );
 
-          if (progress >= 1) {
-            progress = 1;
+          if (stopProgress >= 1) {
             pointerRef.current.angle =
               physics.current.startAngle + physics.current.distance;
 
-            // --- ФИНАЛЬНЫЙ АКЦЕНТИРОВАННЫЙ ЩЕЛЧОК ---
-            // Срабатывает в идеальный момент полной остановки физики
             gameAudio.play("tick_final");
 
             pointerRef.current.angle = pointerRef.current.angle % 360;
             physics.current.isStopping = false;
 
-            // Взводим волну в 0 для запуска при выигрыше
+            // Мгновенно стираем шлейф на этом же кадре
+            if (speedFxRef.current) {
+              speedFxRef.current.clear();
+              isSpeedFxActive.current = false;
+            }
+
+            // Запускаем волну точно в момент удара стрелки
             if (state.pendingPayout > 0) {
               physics.current.winRippleProgress = 0;
               physics.current.lossPulseProgress = 1;
             } else {
               physics.current.winRippleProgress = 1;
-              physics.current.lossPulseProgress = 0; // Запускаем урон
+              physics.current.lossPulseProgress = 0;
             }
 
             state.completeSpin();
           } else {
-            const easeOut = progress * (2 - progress);
+            // Кубический ease-out: стрелка быстро сбрасывает скорость, но интригующе наплывает в конце
+            const easeOut = 1 - Math.pow(1 - stopProgress, STOP_EASE_POWER);
             const traveledNow = physics.current.distance * easeOut;
             physics.current.traveled = traveledNow;
 
@@ -187,19 +342,57 @@ const UpgraderCore = () => {
         }
       }
 
+      // --- ОТРИСОВКА ШЛЕЙФА СКОРОСТИ ---
+      // Вызывается строго ПОСЛЕ движения стрелки, передавая актуальный stopProgress
+      if (
+        speedFxRef.current &&
+        (spinState === "requesting" ||
+          (spinState === "spinning" && stopProgress < 1))
+      ) {
+        if (instantSpeed > 0.1) {
+          drawSpeedFxRef.current(
+            speedFxRef.current,
+            instantSpeed,
+            delta,
+            pointerRef.current.angle,
+            stopProgress,
+          );
+          isSpeedFxActive.current = true;
+        }
+      } else if (speedFxRef.current && isSpeedFxActive.current) {
+        speedFxRef.current.clear();
+        isSpeedFxActive.current = false;
+      }
+
       //5.  Если стрелка + опережение пересекли заветную отметку (45, 90, 135...)
       if (
         pointerRef.current.angle - CORRECTION_SPIN_SOUND >=
         physics.current.nextTickAngle
       ) {
-        gameAudio.play("tick");
-        physics.current.nextTickAngle += 45; // Ставим следующую цель ровно через 45 градусов
+        // Нормализуем текущую скорость относительно максимума (от 0 до 1)
+        const speedRatio = Math.min(
+          1,
+          Math.max(0, instantSpeed / MAX_VELOCITY),
+        );
+
+        // Динамический питч: от 0.78 (тяжелый тягучий щелчок) до 1.22 (звонкий резкий)
+        const currentRate = 0.78 + speedRatio * 0.44;
+
+        // Динамическая громкость: на излете звук чуть затихает, освобождая сцену под tick_final
+        const currentVolume = 0.5 + speedRatio * 0.5;
+
+        const soundId = gameAudio.play("tick");
+        gameAudio.rate(currentRate, soundId);
+        gameAudio.volume(currentVolume, soundId);
+
+        physics.current.nextTickAngle += 45;
       }
     };
 
     Ticker.shared.add(handleTick);
     return () => {
       Ticker.shared.remove(handleTick);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -300,6 +493,7 @@ const UpgraderCore = () => {
 
   return (
     <pixiContainer x={400} y={200}>
+      <pixiGraphics ref={speedFxRef} draw={noopDraw} />
       <pixiGraphics ref={radarRef} draw={drawRadar} />
       <pixiContainer ref={pointerRef}>
         <pixiGraphics draw={drawPointer} />

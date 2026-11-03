@@ -33,7 +33,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setWinChance: (chance) => {
     if (get().spinState !== "idle") return;
-    set({ winChance: chance, lastResult: null });
+    // Меняем только сектор: не затираем lastResult, чтобы плашка результата не моргала в пустоту
+    set({ winChance: chance });
   },
 
   startSpin: async () => {

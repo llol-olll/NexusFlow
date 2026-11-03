@@ -35,8 +35,15 @@ export default function App() {
   // Если текущий шанс не входит в массив стандартных, значит выбрана кастомная/рандомная кнопка
   const isCustomChance = !CHANCE_PRESETS.includes(winChance);
 
+  const handlePresetClick = (preset: number) => {
+    // Не воспроизводим звук и не дергаем стейт, если пресет уже активен
+    if (winChance === preset) return;
+    gameAudio.play("tick_final");
+    setWinChance(preset);
+  };
+
   const handleRandomChance = () => {
-    // Генерируем случайный шанс от 1 до 90
+    gameAudio.play("tick_final");
     const randomChance = Math.floor(Math.random() * 90) + 1;
     setWinChance(randomChance);
   };
@@ -100,7 +107,7 @@ export default function App() {
             <button
               key={preset}
               disabled={isSpinning}
-              onClick={() => setWinChance(preset)}
+              onClick={() => handlePresetClick(preset)}
               className={`px-4 py-2 rounded-lg font-mono text-sm font-bold transition cursor-pointer disabled:opacity-50 ${
                 winChance === preset
                   ? "bg-emerald-500 text-slate-950"

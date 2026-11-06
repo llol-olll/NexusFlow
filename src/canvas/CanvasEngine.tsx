@@ -163,10 +163,29 @@ const UpgraderCore = () => {
       state.completeSpin();
     };
 
+    // Завершаем спин только по факту переключения вкладки (событийно, без опроса в каждом кадре)
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        forceInstantFinish();
+      const state = useAppStore.getState();
+      if (
+        !document.hidden ||
+        state.spinState !== "spinning" ||
+        !pointerRef.current
+      )
+        return;
+
+      // Ставим стрелку на цель и сбрасываем физику
+      pointerRef.current.angle = state.targetAngle;
+      physics.current.isStopping = false;
+      physics.current.targetCalculated = false;
+      physics.current.velocity = 0;
+
+      if (speedFxRef.current) {
+        speedFxRef.current.clear();
+        isSpeedFxActive.current = false;
       }
+
+      gameAudio.play("tick_final");
+      state.completeSpin();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -183,34 +202,34 @@ const UpgraderCore = () => {
       const delta = Math.min(rawDelta, 10);
 
       // --- МАТЕМАТИКА АНИМАЦИИ ВОЛНЫ (Автономный цикл) ---
-      if (spinState === "idle") {
-        let needsRedraw = false;
+      // --- 1. АВТОНОМНЫЙ ТИК ВОЛН (работает в любом стейте без дублирования условий) ---
+      let needsRadarRedraw = false;
 
-        // 1. Волна победы: летит своим чередом до 1, не оглядываясь на смену lastResult
-        if (physics.current.winRippleProgress < 1) {
-          physics.current.winRippleProgress += delta * 0.035;
-          if (physics.current.winRippleProgress >= 1) {
-            physics.current.winRippleProgress = 1;
-          }
-          needsRedraw = true;
-        }
-
-        // 2. Вспышка урона: завершается гарантированно без обрыва
-        if (physics.current.lossPulseProgress < 1) {
-          physics.current.lossPulseProgress += delta * 0.025;
-          if (physics.current.lossPulseProgress >= 1) {
-            physics.current.lossPulseProgress = 1;
-          }
-          needsRedraw = true;
-        }
-
-        // Перерисовываем холст только пока тикает активная волна
-        if (needsRedraw && radarRef.current) {
-          drawRadarRef.current(radarRef.current);
-        }
+      // Волна победы: мягко долетает до конца, даже если уже нажали "Крутить"
+      if (physics.current.winRippleProgress < 1) {
+        physics.current.winRippleProgress = Math.min(
+          1,
+          physics.current.winRippleProgress + delta * 0.035,
+        );
+        needsRadarRedraw = true;
       }
 
-      // --- РАННИЙ ВЫХОД ---
+      // Вспышка поражения: аналогично живет своей жизнью до единицы
+      if (physics.current.lossPulseProgress < 1) {
+        physics.current.lossPulseProgress = Math.min(
+          1,
+          physics.current.lossPulseProgress + delta * 0.025,
+        );
+        needsRadarRedraw = true;
+      }
+
+      // Перерисовываем радар только если хотя бы одна волна в движении
+      if (needsRadarRedraw && radarRef.current) {
+        drawRadarRef.current(radarRef.current);
+      }
+
+      // --- 2. РАННИЙ ВЫХОД ДЛЯ ФИЗИКИ СТРЕЛКИ ---
+      // Если колесо в покое, глушим скорость стрелки и выходим, не считая физику движения
       if (spinState === "idle") {
         physics.current.velocity = 0;
         return;
@@ -219,14 +238,8 @@ const UpgraderCore = () => {
       // 3. СТАДИЯ 1: Разгон и кручение
       if (spinState === "requesting") {
         if (physics.current.velocity === 0 && !physics.current.isStopping) {
-          physics.current.winRippleProgress = 1;
-          physics.current.lossPulseProgress = 1;
-
-          // 2. Заставляем PixiJS стереть зависшие волны (вызов g.clear())
-          if (radarRef.current) {
-            drawRadarRef.current(radarRef.current);
-          }
-
+          // Инициализируем только угол для звуковых тиков и сбрасываем флаги физики,
+          // НЕ трогая прогресс волн — они сами плавно завершатся в блоке выше
           const currentA = pointerRef.current.angle;
           let nextGrid = Math.floor(currentA / 45) * 45 + 45;
 
